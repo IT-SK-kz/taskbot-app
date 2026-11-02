@@ -2,22 +2,500 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
 <title>Поручения</title>
+<!--
+  Telegram Mini App бота поручений (08.03, ADR-022). Один файл без сборки: страница, стили и код.
+  Данные — только из API бота (адрес выбирается из закрытого списка ниже), вход — подписью Telegram initData.
+  Тексты пользователя выводятся только как текст (textContent), не как HTML.
+-->
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-  :root { color-scheme: light dark; }
-  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
-         font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #F1F5F9; color: #0F172A; }
-  main { max-width: 360px; padding: 24px; text-align: center; }
-  h1 { font-size: 22px; margin: 0 0 8px; }
-  p { margin: 0; color: #64748B; }
-  @media (prefers-color-scheme: dark) { body { background: #0E1621; color: #F1F5F9; } p { color: #94A3B8; } }
+:root {
+  --primary: #4F46E5; --primary-tint: #EEF2FF; --on-primary: #FFFFFF;
+  --info: #0369A1; --info-tint: #E0F2FE; --ok: #15803D; --ok-tint: #DCFCE7;
+  --warn: #B45309; --warn-tint: #FEF3C7; --bad: #B91C1C; --bad-tint: #FEE2E2;
+  --bg: #FFFFFF; --bg2: #F1F5F9; --text: #0F172A; --hint: #64748B; --line: #E2E8F0;
+}
+:root.dark {
+  --primary: #818CF8; --primary-tint: #312E81; --on-primary: #0F172A;
+  --info: #7DD3FC; --info-tint: #0C4A6E; --ok: #86EFAC; --ok-tint: #14532D;
+  --warn: #FCD34D; --warn-tint: #78350F; --bad: #FCA5A5; --bad-tint: #7F1D1D;
+  --bg: #17212B; --bg2: #0E1621; --text: #F1F5F9; --hint: #94A3B8; --line: #243447;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; padding: 0; }
+body { font: 16px/1.4 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg2); color: var(--text);
+       padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+button, input, select, textarea { font: inherit; color: inherit; }
+main { max-width: 640px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 22px; margin: 0 0 8px; }
+.sub, .meta, .note { font-size: 13px; color: var(--hint); }
+.note { margin-top: 4px; }
+.seg { display: flex; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 4px; gap: 4px; margin-bottom: 8px; }
+.seg button { flex: 1; border: 0; background: none; border-radius: 8px; padding: 6px 0; font-size: 13px; font-weight: 500; color: var(--hint); }
+.seg button.on { background: var(--primary); color: var(--on-primary); }
+.search { width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; margin-bottom: 8px; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; align-items: center; }
+.chip { font-size: 13px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); }
+.chip.on { background: var(--primary-tint); border-color: var(--primary); color: var(--primary); font-weight: 600; }
+select.chip { appearance: none; -webkit-appearance: none; padding-right: 22px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--hint) 50%), linear-gradient(135deg, var(--hint) 50%, transparent 50%);
+  background-position: calc(100% - 12px) 55%, calc(100% - 8px) 55%; background-size: 4px 4px; background-repeat: no-repeat; }
+.link { border: 0; background: none; color: var(--primary); font-weight: 600; font-size: 13px; padding: 4px 2px; }
+.card { display: block; width: 100%; text-align: left; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 8px; }
+.row1 { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.num { font-size: 13px; color: var(--hint); font-weight: 600; }
+.title { font-size: 15px; font-weight: 600; margin-bottom: 4px; overflow-wrap: anywhere; }
+.tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 8px; }
+.tag { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 6px; }
+.s-new { background: var(--primary-tint); color: var(--primary); }
+.s-work { background: var(--info-tint); color: var(--info); }
+.s-review { background: var(--warn-tint); color: var(--warn); }
+.s-done { background: var(--ok-tint); color: var(--ok); }
+.s-bad { background: var(--bad-tint); color: var(--bad); }
+.s-plain { background: var(--bg2); border: 1px solid var(--line); }
+.back { border: 0; background: none; color: var(--primary); font-weight: 500; padding: 0; margin-bottom: 8px; }
+.fields { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; margin: 8px 0; }
+.f { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.f:last-child { border-bottom: 0; }
+.f .k { color: var(--hint); flex: 0 0 108px; }
+.f .v { text-align: right; font-weight: 500; overflow-wrap: anywhere; }
+.sec { font-size: 13px; font-weight: 600; color: var(--hint); text-transform: uppercase; letter-spacing: .04em; margin: 16px 0 8px; }
+.hist { font-size: 13px; border-left: 2px solid var(--line); padding-left: 12px; margin-left: 4px; }
+.hist div { margin-bottom: 8px; overflow-wrap: anywhere; }
+.btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+.btn { flex: 1 1 140px; text-align: center; padding: 10px; border-radius: 10px; font-weight: 600; border: 1px solid var(--line); background: var(--bg); color: var(--primary); }
+.btn.main { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+.btn.danger { border-color: var(--bad); color: var(--bad); }
+label.lbl { display: block; font-size: 13px; font-weight: 600; color: var(--hint); margin: 12px 0 4px; }
+.inp { width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+textarea.inp { min-height: 72px; resize: vertical; }
+.inp.changed { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-tint); }
+.was { font-size: 12px; color: var(--primary); margin-top: 4px; font-weight: 500; }
+.pick { display: flex; gap: 4px; flex-wrap: wrap; }
+.pick button { font-size: 13px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); }
+.pick button.on { border-color: var(--primary); background: var(--primary-tint); color: var(--primary); font-weight: 600; }
+.alert { border-radius: 10px; padding: 10px 12px; font-size: 13px; margin-top: 8px; }
+.a-bad { background: var(--bad-tint); color: var(--bad); }
+.a-info { background: var(--info-tint); color: var(--info); }
+.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+.st { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; text-align: left; }
+.st b { display: block; font-size: 22px; }
+.st span { font-size: 13px; color: var(--hint); }
+.st.bad b { color: var(--bad); }
+.rep { display: flex; justify-content: space-between; align-items: center; gap: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; margin-bottom: 8px; }
+.tabs { position: fixed; left: 0; right: 0; bottom: 0; display: flex; background: var(--bg); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
+.tabs button { flex: 1; border: 0; background: none; padding: 8px 0 10px; font-size: 12px; color: var(--hint); display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.tabs button.on { color: var(--primary); font-weight: 600; }
+.tabs .i { font-size: 18px; line-height: 1; }
+.empty { text-align: center; color: var(--hint); padding: 32px 16px; }
+.more { width: 100%; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+button:disabled { opacity: .5; }
 </style>
 </head>
 <body>
-<main>
-  <h1>Поручения</h1>
-  <p>Приложение готовится. Пока работайте с поручениями в личке с ботом.</p>
-</main>
+<main id="app"><div class="empty">Загрузка…</div></main>
+<nav class="tabs" id="tabs" hidden>
+  <button data-tab="list"><span class="i">☰</span>Задачи</button>
+  <button data-tab="new"><span class="i">＋</span>Новая</button>
+  <button data-tab="reports"><span class="i">▦</span>Отчёты</button>
+</nav>
+<script>
+"use strict";
+// Куда ходить за данными — только из этого списка: подпись Telegram не уходит на чужие адреса
+const APIS = { "": "https://api.saq-tech.kz", test: "https://api-test.saq-tech.kz" };
+const API = APIS[new URLSearchParams(location.search).get("env") || ""];
+const tg = window.Telegram && window.Telegram.WebApp;
+const STATES = { new: "Новая", accepted: "Принята", in_progress: "В работе", review: "На проверке", done: "Выполнена",
+                 rework: "На доработке", cancelled: "Отменена" };
+const STATE_CLASS = { new: "s-new", accepted: "s-work", in_progress: "s-work", review: "s-review", rework: "s-review",
+                      done: "s-done", cancelled: "s-plain" };
+const PRIORITIES = [["low", "Низкий"], ["normal", "Обычный"], ["high", "Высокий"], ["critical", "Критический"]];
+const ACTIONS = { accept: "Принять", start: "Начать выполнение", submit: "Отправить результат",
+                  approve: "Принять результат", return: "Вернуть на доработку" };
+const WEEKDAYS = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
+
+let me = null;
+const view = { tab: "list", scope: null, state: "open", assignee: "", project: "", due: "", q: "", items: [], total: 0 };
+
+// --- оформление: тема Telegram
+function applyTheme() {
+  const dark = tg ? tg.colorScheme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.classList.toggle("dark", dark);
+}
+
+// --- безопасная сборка разметки: только узлы и текст
+function el(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs || {})) {
+    if (value === null || value === undefined || value === false) continue;
+    if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+    else if (key === "class") node.className = value;
+    else node.setAttribute(key, value === true ? "" : value);
+  }
+  for (const child of children.flat(Infinity)) {
+    if (child === null || child === undefined || child === false) continue;
+    node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+  }
+  return node;
+}
+function put(node, ...children) {
+  node.replaceChildren(...children.flat(Infinity).filter((c) => c !== null && c !== undefined && c !== false)
+    .map((c) => (c instanceof Node ? c : document.createTextNode(String(c)))));
+}
+function show(...nodes) { put(document.getElementById("app"), ...nodes); window.scrollTo(0, 0); }
+
+// --- даты: API отдаёт «ГГГГ-ММ-ДДTЧЧ:ММ» по часам группы
+function dueText(due) {
+  if (!due) return "без срока";
+  const [day, time] = due.split("T");
+  const [y, m, d] = day.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const diff = Math.round((date - today) / 86400000);
+  const word = diff === 0 ? "сегодня" : diff === 1 ? "завтра" : diff === -1 ? "вчера" : `${WEEKDAYS[date.getDay()]}, ${String(d).padStart(2, "0")}.${String(m).padStart(2, "0")}`;
+  return time === "18:30" && Math.abs(diff) > 1 ? word : `${word} ${time}`;
+}
+function fullDue(due) {
+  if (!due) return "без срока";
+  const [day, time] = due.split("T"); const [y, m, d] = day.split("-");
+  return `${d}.${m}.${y}, ${time}`;
+}
+function isoDay(date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`; }
+
+// --- обращение к API
+async function call(method, path, body) {
+  const response = await fetch(API + path, {
+    method,
+    headers: { Authorization: "tma " + tg.initData, ...(body ? { "Content-Type": "application/json" } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+    cache: "no-store",
+  });
+  let data = null;
+  try { data = await response.json(); } catch (e) { data = null; }
+  if (!response.ok) throw new Error((data && data.error) || "Сервер бота сейчас недоступен. Попробуйте позже.");
+  return data;
+}
+function say(text) { if (tg && tg.showAlert) tg.showAlert(text); else alert(text); }
+function haptic(kind) { if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred(kind); }
+
+// --- нижняя кнопка и «Назад» Telegram
+let mainHandler = null, backHandler = null;
+function mainButton(text, handler) {
+  if (!tg) return;
+  if (mainHandler) tg.MainButton.offClick(mainHandler);
+  mainHandler = handler;
+  if (!handler) { tg.MainButton.hide(); return; }
+  tg.MainButton.setParams({ text, is_visible: true, is_active: true });
+  tg.MainButton.onClick(handler);
+}
+function backButton(handler) {
+  if (!tg) return;
+  if (backHandler) tg.BackButton.offClick(backHandler);
+  backHandler = handler;
+  if (handler) { tg.BackButton.show(); tg.BackButton.onClick(handler); } else tg.BackButton.hide();
+}
+async function busy(work) {
+  if (tg) tg.MainButton.showProgress(false);
+  try { return await work(); } finally { if (tg) tg.MainButton.hideProgress(); }
+}
+
+// --- роли
+const groups = () => (me ? me.groups : []);
+const hasRole = (role) => groups().some((g) => g.roles.includes(role));
+const canCreate = () => groups().some((g) => g.can_create);
+const people = () => { const seen = new Map(); for (const g of groups()) for (const p of g.people) seen.set(p.tg, p); return [...seen.values()]; };
+const allProjects = () => { const seen = new Map(); for (const g of groups()) for (const p of g.projects) seen.set(p.id, p); return [...seen.values()]; };
+
+// --- элементы задачи
+function tags(task) {
+  return el("div", { class: "tags" },
+    el("span", { class: "tag " + (STATE_CLASS[task.state] || "s-plain") }, task.state_name),
+    task.overdue ? el("span", { class: "tag s-bad" }, "Просрочена") : null,
+    task.priority === "critical" ? el("span", { class: "tag s-bad" }, "‼ Критический")
+      : task.priority === "high" ? el("span", { class: "tag s-plain" }, "▲ Высокий")
+      : el("span", { class: "tag s-plain" }, task.priority_name[0].toUpperCase() + task.priority_name.slice(1)));
+}
+function taskCard(task) {
+  const who = view.scope === "my" ? `поставил ${task.creator.name}` : task.assignee.name;
+  return el("button", { class: "card", onclick: () => openTask(task.id) },
+    el("div", { class: "row1" }, el("span", { class: "num" }, `№${task.id}`), el("span", { class: "meta" }, "срок " + dueText(task.due))),
+    el("div", { class: "title" }, task.title),
+    el("div", { class: "meta" }, `${who} · ${task.project.name}`),
+    tags(task));
+}
+
+// --- 1. список
+function scopes() {
+  const list = [["my", "Мои"]];
+  if (hasRole("setter") || hasRole("manager")) list.push(["set", "Поставил"]);
+  if (hasRole("manager")) list.push(["all", "Все в группе"]);
+  return list;
+}
+async function loadList(append) {
+  const query = new URLSearchParams({ scope: view.scope, state: view.state, offset: append ? view.items.length : 0 });
+  for (const key of ["assignee", "project", "due", "q"]) if (view[key]) query.set(key, view[key]);
+  const data = await call("GET", "/api/tasks?" + query);
+  view.items = append ? view.items.concat(data.items) : data.items;
+  view.total = data.total;
+}
+function filtersActive() { return view.state !== "open" || view.assignee || view.project || view.due || view.q; }
+async function showList() {
+  view.tab = "list"; markTab(); backButton(null); mainButton(null);
+  if (!view.scope) view.scope = hasRole("manager") ? "all" : "my";
+  try { await loadList(false); } catch (e) { show(el("div", { class: "empty" }, e.message)); return; }
+  const late = view.items.filter((t) => t.overdue).length;
+  const seg = el("div", { class: "seg" }, scopes().map(([code, name]) =>
+    el("button", { class: view.scope === code ? "on" : "", onclick: () => { view.scope = code; showList(); } }, name)));
+  let timer = null;
+  const search = el("input", { class: "search", type: "search", placeholder: "Поиск по тексту задач", value: view.q,
+    oninput: (event) => { clearTimeout(timer); timer = setTimeout(() => { view.q = event.target.value.trim(); showList(); }, 500); } });
+  const select = (key, label, options) => el("select", { class: "chip" + (view[key] ? " on" : ""), "aria-label": label,
+    onchange: (event) => { view[key] = event.target.value; showList(); } },
+    el("option", { value: "" }, label), options.map(([value, name]) => el("option", { value, selected: String(view[key]) === String(value) }, name)));
+  const chips = el("div", { class: "chips" },
+    view.scope !== "my" ? select("assignee", "Исполнитель", people().map((p) => [p.tg, p.name])) : null,
+    select("project", "Проект", allProjects().map((p) => [p.id, p.name])),
+    el("select", { class: "chip" + (view.state !== "open" ? " on" : ""), "aria-label": "Состояние",
+      onchange: (event) => { view.state = event.target.value; showList(); } },
+      [["open", "Открытые"], ["closed", "Закрытые"], ["all", "Все"], ["review", "На проверке"], ["rework", "На доработке"]]
+        .map(([value, name]) => el("option", { value, selected: view.state === value }, name))),
+    select("due", "Срок", [["late", "Просроченные"], ["today", "Сегодня"]]),
+    filtersActive() ? el("button", { class: "link", onclick: () => { Object.assign(view, { state: "open", assignee: "", project: "", due: "", q: "" }); showList(); } }, "Сбросить") : null);
+  const items = view.items.length ? view.items.map(taskCard) : [el("div", { class: "empty" }, "Поручений по выбранным условиям нет.")];
+  const more = view.items.length < view.total ? el("button", { class: "btn more", onclick: async () => { await loadList(true); showList(); } }, "Показать ещё") : null;
+  show(seg, search, chips, el("div", { class: "meta", style: "margin:4px 0 8px" }, `${view.total} ${plural(view.total, "поручение", "поручения", "поручений")}` + (late ? ` · ${late} просрочено` : "")), ...items, more);
+}
+function plural(n, one, few, many) { const m = n % 100, k = n % 10; return m > 10 && m < 20 ? many : k === 1 ? one : k >= 2 && k <= 4 ? few : many; }
+
+// --- 2. карточка
+function historyLine(item) {
+  const [day, time] = item.at.split("T"); const [, m, d] = day.split("-");
+  const step = item.from === null ? "создал" : item.from === item.to ? (item.comment || "") : `${STATES[item.from] || item.from} → ${STATES[item.to] || item.to}`;
+  const note = item.from !== item.to && item.comment ? ` (${item.comment})` : "";
+  return el("div", {}, el("b", {}, `${d}.${m} ${time} `), el("span", { class: "meta" }, `${item.who}: `), step + note);
+}
+async function openTask(id) {
+  let task;
+  try { task = await call("GET", `/api/tasks/${id}`); } catch (e) { say(e.message); return; }
+  backButton(() => showList()); mainButton(null);
+  const buttons = task.actions.filter((a) => ACTIONS[a]).map((action) =>
+    el("button", { class: "btn main", onclick: () => act(task, action) }, ACTIONS[action]));
+  if (task.actions.includes("edit")) buttons.push(el("button", { class: "btn", onclick: () => editTask(task) }, "Изменить"));
+  if (task.actions.includes("cancel")) buttons.push(el("button", { class: "btn danger", onclick: () => act(task, "cancel") }, "Отменить поручение"));
+  show(
+    el("button", { class: "back", onclick: () => showList() }, "‹ Задачи"),
+    el("div", { class: "num" }, `№${task.id}`), el("h1", {}, task.title), tags(task),
+    el("div", { class: "fields" },
+      [["Исполнитель", task.assignee.name], ["Постановщик", task.creator.name], ["Группа", task.group.title],
+       ["Проект", task.project.name], ["Срок", fullDue(task.due)], ["Приоритет", task.priority_name]]
+        .map(([k, v]) => el("div", { class: "f" }, el("span", { class: "k" }, k), el("span", { class: "v" }, v)))),
+    el("div", { class: "sec" }, "История"),
+    el("div", { class: "hist" }, task.history.slice().reverse().map(historyLine)),
+    buttons.length ? el("div", { class: "btns" }, buttons) : null);
+}
+async function act(task, action, comment) {
+  if (action === "return" && !comment) { askComment(task); return; }
+  if (action === "cancel" && !(await confirmAsk(`Отменить поручение №${task.id}? Исполнитель получит уведомление.`))) return;
+  try {
+    await call("POST", `/api/tasks/${task.id}/action`, { version: task.version, action, comment });
+    haptic("success");
+  } catch (e) { haptic("error"); say(e.message); }
+  openTask(task.id);
+}
+function askComment(task) {
+  const text = el("textarea", { class: "inp", maxlength: "500", placeholder: "Что нужно исправить" });
+  const box = el("div", { class: "alert a-info" }, el("label", { class: "lbl", style: "margin-top:0" }, "Вернуть на доработку"), text,
+    el("div", { class: "btns" },
+      el("button", { class: "btn main", onclick: () => (text.value.trim() ? act(task, "return", text.value.trim()) : say("Укажите, что нужно исправить.")) }, "Вернуть"),
+      el("button", { class: "btn", onclick: () => box.remove() }, "Отмена")));
+  document.getElementById("app").append(box);
+  text.focus();
+}
+function confirmAsk(text) {
+  return new Promise((resolve) => (tg && tg.showConfirm ? tg.showConfirm(text, resolve) : resolve(confirm(text))));
+}
+
+// --- общие поля формы: срок и приоритет
+function dueField(state, label) {
+  const today = new Date(); const tomorrow = new Date(Date.now() + 86400000);
+  const friday = new Date(); friday.setDate(friday.getDate() + ((5 - friday.getDay() + 7) % 7 || 7));
+  const picks = [["Сегодня 18:30", isoDay(today) + "T18:30"], ["Завтра", isoDay(tomorrow) + "T18:30"],
+                 ["Пятница", isoDay(friday) + "T18:30"], ["Без срока", ""]];
+  const date = el("input", { class: "inp", type: "datetime-local", value: state.due || "",
+    onchange: (event) => { state.due = event.target.value; redraw(true); } });
+  const pick = el("div", { class: "pick" });
+  const note = el("div", { class: "note" });
+  function redraw(changed) {
+    pick.replaceChildren(...picks.map(([name, value]) => el("button", { type: "button", class: state.due === value ? "on" : "",
+      onclick: () => { state.due = value; date.value = value; redraw(true); } }, name)));
+    note.textContent = state.due ? fullDue(state.due) : "без срока";
+    if (changed && state.onchange) state.onchange();
+  }
+  redraw();
+  return [el("label", { class: "lbl" }, label), pick, el("div", { style: "margin-top:8px" }, date), note];
+}
+function priorityField(state) {
+  const pick = el("div", { class: "pick" });
+  function redraw() {
+    pick.replaceChildren(...PRIORITIES.map(([code, name]) => el("button", { type: "button", class: state.priority === code ? "on" : "",
+      onclick: () => { state.priority = code; redraw(); if (state.onchange) state.onchange(); } }, name)));
+  }
+  redraw();
+  return [el("label", { class: "lbl" }, "Приоритет"), pick];
+}
+const apiDue = (value) => (value ? value.replace(":", "").replace(/^(\d{4}-\d{2}-\d{2}T\d{2})(\d{2})$/, "$1$2") : "none");
+
+// --- 3. создание
+function showNew() {
+  view.tab = "new"; markTab(); backButton(() => showList());
+  const allowed = groups().filter((g) => g.can_create);
+  if (!allowed.length) { mainButton(null); show(el("div", { class: "empty" }, "Ставить поручения могут постановщик и руководитель группы.")); return; }
+  const state = { chat: allowed[0].chat_id, people: [], text: "", project: null, due: "", priority: "normal" };
+  const group = () => allowed.find((g) => g.chat_id === Number(state.chat));
+  const box = el("div");
+  function draw() {
+    const g = group();
+    if (!g.projects.some((p) => p.id === state.project)) state.project = g.projects.length ? g.projects[0].id : null;
+    const chosen = el("div", {}, state.people.map((id) => {
+      const p = g.people.find((x) => x.id === id);
+      return el("button", { type: "button", class: "chip on", style: "margin:0 4px 4px 0", onclick: () => { state.people = state.people.filter((x) => x !== id); draw(); } }, `${p ? p.name : id} ×`);
+    }));
+    const add = el("select", { class: "chip", "aria-label": "Добавить исполнителя", onchange: (event) => {
+      const id = Number(event.target.value); if (id && !state.people.includes(id)) state.people.push(id); draw(); } },
+      el("option", { value: "" }, "+ Добавить"),
+      g.people.filter((p) => !state.people.includes(p.id)).map((p) => el("option", { value: p.id }, p.name)));
+    put(box, 
+      el("h1", {}, "Новое поручение"),
+      allowed.length > 1
+        ? [el("label", { class: "lbl" }, "Группа"), el("select", { class: "inp", onchange: (event) => { state.chat = Number(event.target.value); state.people = []; draw(); } },
+            allowed.map((x) => el("option", { value: x.chat_id, selected: x.chat_id === state.chat }, x.title)))]
+        : el("div", { class: "sub" }, `группа «${g.title}»`),
+      el("label", { class: "lbl" }, "Исполнитель"), chosen, add,
+      el("div", { class: "note" }, "Нескольким — по отдельной задаче каждому."),
+      el("label", { class: "lbl" }, "Что сделать"),
+      el("textarea", { class: "inp", maxlength: "200", oninput: (event) => { state.text = event.target.value; } }, state.text),
+      el("label", { class: "lbl" }, "Проект"),
+      el("select", { class: "inp", onchange: (event) => { state.project = Number(event.target.value); } },
+        g.projects.map((p) => el("option", { value: p.id, selected: p.id === state.project }, p.name))),
+      g.can_add_project ? el("div", { class: "note" }, "Новый проект — командой /projects в боте.") : null,
+      dueField(state, "Срок"), priorityField(state));
+    mainButton(state.people.length > 1 ? `Создать ${state.people.length} поручения` : "Создать поручение", submit);
+  }
+  async function submit() {
+    if (!state.people.length) { say("Выберите исполнителя."); return; }
+    if (!state.text.trim()) { say("Напишите, что сделать."); return; }
+    try {
+      const made = await busy(() => call("POST", "/api/tasks", { chat_id: Number(state.chat), text: state.text, assignees: state.people,
+        due: apiDue(state.due), priority: state.priority, project: state.project }));
+      haptic("success");
+      say(made.created.length > 1 ? `Создано поручений: ${made.created.length}. Исполнители получат уведомления в боте.` : `Поручение №${made.created[0]} создано.`);
+      view.scope = "set"; showList();
+    } catch (e) { haptic("error"); say(e.message); }
+  }
+  show(box); draw();
+}
+
+// --- 4. изменение
+function editTask(task) {
+  const g = groups().find((x) => x.chat_id === task.group.chat_id);
+  const person = g ? g.people.find((p) => p.tg === task.assignee.id) : null;
+  const before = { text: task.title, person: person ? person.id : null, project: task.project.id, due: task.due || "", priority: task.priority };
+  const state = { ...before };
+  backButton(() => openTask(task.id));
+  const box = el("div");
+  const was = (changed, text) => (changed ? el("div", { class: "was" }, "было: " + text) : null);
+  state.onchange = () => draw();
+  function draw() {
+    const changes = diff();
+    put(box, 
+      el("button", { class: "back", onclick: () => openTask(task.id) }, `‹ №${task.id}`),
+      el("h1", {}, `Изменить №${task.id}`),
+      el("label", { class: "lbl" }, "Что сделать"),
+      el("textarea", { class: "inp" + (changes.t ? " changed" : ""), maxlength: "200", onchange: (event) => { state.text = event.target.value; draw(); } }, state.text),
+      was(changes.t, before.text),
+      el("label", { class: "lbl" }, "Исполнитель"),
+      el("select", { class: "inp" + (changes.a ? " changed" : ""), onchange: (event) => { state.person = Number(event.target.value); draw(); } },
+        (g ? g.people : []).map((p) => el("option", { value: p.id, selected: p.id === state.person }, p.name))),
+      was(changes.a, task.assignee.name),
+      el("label", { class: "lbl" }, "Проект"),
+      el("select", { class: "inp" + (changes.j ? " changed" : ""), onchange: (event) => { state.project = Number(event.target.value); draw(); } },
+        (g ? g.projects : []).map((p) => el("option", { value: p.id, selected: p.id === state.project }, p.name))),
+      was(changes.j, task.project.name),
+      dueField(state, "Срок"), was(changes.d, fullDue(task.due)),
+      priorityField(state), was(changes.p, task.priority_name),
+      el("div", { class: "alert a-info" }, "Исполнитель получит уведомление в боте. Изменение попадёт в историю задачи."));
+    mainButton("Сохранить изменения", Object.keys(changes).length ? save : null);
+  }
+  function diff() {
+    const out = {};
+    if (state.text.trim() !== before.text) out.t = state.text.trim();
+    if (state.person && state.person !== before.person) out.a = String(state.person);
+    if (state.project !== before.project) out.j = String(state.project);
+    if (state.due !== before.due) out.d = apiDue(state.due);
+    if (state.priority !== before.priority) out.p = state.priority;
+    return out;
+  }
+  async function save() {
+    try {
+      await busy(() => call("POST", `/api/tasks/${task.id}`, { version: task.version, changes: diff() }));
+      haptic("success"); openTask(task.id);
+    } catch (e) { haptic("error"); say(e.message); if (e.message.startsWith("Поручение уже изменилось")) openTask(task.id); }
+  }
+  show(box); draw();
+}
+
+// --- 5. отчёты
+async function showReports() {
+  view.tab = "reports"; markTab(); backButton(() => showList()); mainButton(null);
+  let data;
+  try { data = await call("GET", "/api/reports"); } catch (e) { show(el("div", { class: "empty" }, e.message)); return; }
+  const stat = (n, label, filter, bad) => el("button", { class: "st" + (bad && n ? " bad" : ""), onclick: () => { Object.assign(view, { state: "open", assignee: "", project: "", due: "", q: "" }, filter); showList(); } },
+    el("b", {}, n), el("span", {}, label));
+  show(
+    el("h1", {}, "Отчёты"),
+    el("div", { class: "sub", style: "margin-bottom:8px" }, groups().map((g) => `«${g.title}»`).join(", ")),
+    el("div", { class: "stats" },
+      stat(data.open, "открытых", {}), stat(data.overdue, "просрочено", { due: "late" }, true),
+      stat(data.review, "ждут проверки", { state: "review" }), stat(data.done_week, "выполнено за неделю", { state: "closed" })),
+    data.links.length ? el("div", { class: "sec" }, "Открыть в Google Таблицах") : null,
+    data.links.map((link) => el("div", { class: "rep" },
+      el("div", {}, el("div", { class: "title" }, link.title), link.date ? el("div", { class: "meta" }, link.date.split("-").reverse().join(".")) : null),
+      el("button", { class: "btn", style: "flex:0 0 auto", onclick: () => (tg ? tg.openLink(link.url) : window.open(link.url, "_blank", "noopener")) }, "Открыть ↗"))),
+    data.links.length ? el("div", { class: "note" }, "Откроется только у тех, кому открыт доступ к папке «Бот поручений».") : null);
+}
+
+// --- нижние вкладки
+function markTab() {
+  for (const button of document.querySelectorAll("#tabs button")) {
+    button.classList.toggle("on", button.dataset.tab === view.tab);
+    if (button.dataset.tab === "new") button.hidden = !canCreate();
+  }
+}
+document.getElementById("tabs").addEventListener("click", (event) => {
+  const button = event.target.closest("button"); if (!button) return;
+  ({ list: showList, new: showNew, reports: showReports })[button.dataset.tab]();
+});
+
+// --- запуск
+async function start() {
+  applyTheme();
+  if (!tg || !tg.initData || !API) {
+    show(el("div", { class: "empty" }, "Откройте приложение из Telegram: кнопка «Приложение» в личке с ботом."));
+    return;
+  }
+  tg.ready(); tg.expand();
+  tg.onEvent("themeChanged", applyTheme);
+  try { me = await call("GET", "/api/me"); } catch (e) { show(el("div", { class: "empty" }, e.message)); return; }
+  if (!me.groups.length) { show(el("div", { class: "empty" }, "У вас пока нет роли в рабочей группе. Обратитесь к администратору.")); return; }
+  document.getElementById("tabs").hidden = false;
+  showList();
+}
+start();
+</script>
 </body>
 </html>
