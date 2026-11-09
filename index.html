@@ -115,8 +115,9 @@ const STATES = { new: "Новая", accepted: "Принята", in_progress: "В
 const STATE_CLASS = { new: "s-new", accepted: "s-work", in_progress: "s-work", review: "s-review", rework: "s-review",
                       done: "s-done", cancelled: "s-plain" };
 const PRIORITIES = [["low", "Низкий"], ["normal", "Обычный"], ["high", "Высокий"], ["critical", "Критический"]];
-const ACTIONS = { accept: "Принять", start: "Начать выполнение", submit: "Отправить результат",
-                  approve: "Принять результат", return: "Вернуть на доработку" };
+const ACTIONS = { accept: "Принять", complete: "Готово", submit: "Отправить результат",
+                  approve: "Принять результат", return: "Вернуть на доработку", reopen: "Вернуть в работу" };
+const TIMES = ["10:00", "12:00", "15:00", "18:30"];
 const WEEKDAYS = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
 
 let me = null;
@@ -290,6 +291,8 @@ async function openTask(id) {
   show(
     el("button", { class: "back", onclick: () => showList() }, "‹ Задачи"),
     el("div", { class: "num" }, `№${task.id}`), el("h1", {}, task.title), tags(task),
+    task.result ? el("div", { class: "fields" }, el("div", { class: "f" }, el("span", { class: "k" }, "Результат"),
+      el("span", { class: "v", style: "text-align:left;font-weight:400" }, task.result))) : null,
     el("div", { class: "fields" },
       [["Исполнитель", task.assignee.name], ["Постановщик", task.creator.name], ["Группа", task.group.title],
        ["Проект", task.project.name], ["Срок", fullDue(task.due)], ["Приоритет", task.priority_name]]
@@ -326,18 +329,27 @@ function dueField(state, label) {
   const friday = new Date(); friday.setDate(friday.getDate() + ((5 - friday.getDay() + 7) % 7 || 7));
   const picks = [["Сегодня 18:30", isoDay(today) + "T18:30"], ["Завтра", isoDay(tomorrow) + "T18:30"],
                  ["Пятница", isoDay(friday) + "T18:30"], ["Без срока", ""]];
-  const date = el("input", { class: "inp", type: "datetime-local", value: state.due || "",
-    onchange: (event) => { state.due = event.target.value; redraw(true); } });
+  // День — календарём телефона или компьютера, время — кнопками, как в чате (09.31); без выбора времени — 18:30
+  const date = el("input", { class: "inp", type: "date", min: isoDay(today), value: (state.due || "").split("T")[0],
+    onchange: (event) => {
+      const day = event.target.value;
+      state.due = day ? `${day}T${(state.due || "").split("T")[1] || "18:30"}` : "";
+      redraw(true);
+    } });
   const pick = el("div", { class: "pick" });
+  const times = el("div", { class: "pick", style: "margin-top:8px" });
   const note = el("div", { class: "note" });
   function redraw(changed) {
     pick.replaceChildren(...picks.map(([name, value]) => el("button", { type: "button", class: state.due === value ? "on" : "",
-      onclick: () => { state.due = value; date.value = value; redraw(true); } }, name)));
+      onclick: () => { state.due = value; date.value = value.split("T")[0]; redraw(true); } }, name)));
+    const [day, time] = (state.due || "").split("T");
+    times.replaceChildren(...(day ? TIMES : []).map((item) => el("button", { type: "button", class: time === item ? "on" : "",
+      onclick: () => { state.due = `${day}T${item}`; redraw(true); } }, item)));
     note.textContent = state.due ? fullDue(state.due) : "без срока";
     if (changed && state.onchange) state.onchange();
   }
   redraw();
-  return [el("label", { class: "lbl" }, label), pick, el("div", { style: "margin-top:8px" }, date), note];
+  return [el("label", { class: "lbl" }, label), pick, el("div", { style: "margin-top:8px" }, date), times, note];
 }
 function priorityField(state) {
   const pick = el("div", { class: "pick" });
