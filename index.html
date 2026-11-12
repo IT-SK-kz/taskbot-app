@@ -653,16 +653,64 @@ function calendarSection(cal) {
   ];
 }
 
+// --- 6в. ключи (11.06, ПР-061): только владелец, только ввод; проверка у поставщика → «Подтвердить» за 5 минут
+const FIELD_NAMES = { GROQ_API_KEY: "Ключ Groq", CLOUDFLARE_API_TOKEN: "Токен Cloudflare (Workers AI)", CLOUDFLARE_ACCOUNT_ID: "ID аккаунта Cloudflare" };
+function keysSection(items) {
+  const card = (item) => {
+    const inputs = item.fields.map((f) => [f, el("input", { class: "inp", type: "password", autocomplete: "off", spellcheck: "false", placeholder: FIELD_NAMES[f] || f })]);
+    const check = async () => {
+      const values = Object.fromEntries(inputs.map(([f, input]) => [f, input.value.trim()]));
+      if (Object.values(values).some((v) => !v)) { say("Заполните все поля."); return; }
+      let started;
+      try { started = await busy(() => call("POST", "/api/admin/secrets", { name: item.name, values, client: tg ? tg.platform : "" })); }
+      catch (e) { haptic("error"); say(e.message); return; }
+      for (const [, input] of inputs) input.value = "";
+      const until = new Date(started.expires).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+      const sure = await confirmAsk(`${item.title}: проверен у поставщика. Подтвердить замену? Подтверждение действует до ${until}. Всем администраторам придёт сообщение, бот перезапустится; отменить смену можно 24 часа.`);
+      if (!sure) { say("Ключ не изменён."); return; }
+      try {
+        await busy(() => call("POST", "/api/admin/secrets/confirm", { pending: started.pending }));
+        haptic("success");
+        show(el("div", { class: "empty" }, "Ключ заменён. Бот перезапускается — настройки откроются снова через несколько секунд."));
+        setTimeout(showSettings, 12000);
+      } catch (e) { haptic("error"); say(e.message); }
+    };
+    const undo = async () => {
+      if (!(await confirmAsk(`Отменить смену: ${item.title}? Вернётся прежний ключ, бот перезапустится.`))) return;
+      try {
+        await busy(() => call("POST", "/api/admin/secrets/undo", { name: item.name }));
+        haptic("success");
+        show(el("div", { class: "empty" }, "Смена отменена. Бот перезапускается — настройки откроются снова через несколько секунд."));
+        setTimeout(showSettings, 12000);
+      } catch (e) { haptic("error"); say(e.message); }
+    };
+    const where = !item.set ? "не задан" : item.from_panel ? "задан в панели" : "задан в .env на сервере";
+    return el("div", { class: "set" },
+      el("div", { class: "title" }, item.title),
+      el("div", { class: "note" }, item.undo_until ? `${where}; отменить смену можно до ${localTime(item.undo_until)}` : where),
+      inputs.map(([, input]) => [input, el("div", { style: "height:8px" })]),
+      el("div", { class: "btns" },
+        el("button", { class: "btn main", onclick: check }, "Проверить и заменить"),
+        item.undo_until ? el("button", { class: "btn danger", onclick: undo }, "Отменить смену") : null));
+  };
+  return [
+    el("div", { class: "sec" }, "Ключи"),
+    el("div", { class: "note" }, "Видите только вы. Ключ не показывается — только «задан». Новый ключ проверяется у поставщика, затем нужно подтвердить; всем администраторам придёт сообщение. Токен бота и ключ копий меняются только на сервере."),
+    items.map(card),
+  ];
+}
+
 async function showSettings() {
   view.tab = "settings"; markTab(); backButton(groups().length ? () => showList() : null); mainButton(null);
-  let data, state, known, cal;
-  try { [data, state, known, cal] = await Promise.all([call("GET", "/api/admin/settings"), call("GET", "/api/admin/status"), call("GET", "/api/admin/groups"), call("GET", "/api/admin/calendar")]); }
+  let data, state, known, cal, keys;
+  try { [data, state, known, cal, keys] = await Promise.all([call("GET", "/api/admin/settings"), call("GET", "/api/admin/status"), call("GET", "/api/admin/groups"), call("GET", "/api/admin/calendar"), me.owner ? call("GET", "/api/admin/secrets") : null]); }
   catch (e) { show(el("div", { class: "empty" }, e.message)); return; }
   show(
     el("h1", {}, "Настройки"),
     el("div", { class: "sub" }, "Изменение действует сразу: бот перезапускается за несколько секунд, администраторам приходит сообщение. Ключи и токены здесь не показываются."),
     groupsSection(known.groups, data.items.find((item) => item.key === "ALLOWED_GROUP_IDS")),
     calendarSection(cal),
+    keys ? keysSection(keys.items) : null,
     SETTING_GROUPS.map(([group, title]) => [
       el("div", { class: "sec" }, title),
       data.items.filter((item) => settingGroup(item.key) === group).map((item) => settingCard(item, data.providers)),
