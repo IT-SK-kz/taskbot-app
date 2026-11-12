@@ -492,17 +492,18 @@ const PROVIDER_NAMES = { groq: "Groq", cloudflare: "Cloudflare" };
 function settingGroup(key) {
   if (key.endsWith("_PROVIDER")) return "ai";
   if (key.startsWith("WORK_") || key === "MIN_ANALYSIS_WORDS") return "work";
+  if (key === "ALLOWED_GROUP_IDS") return "groups";  // свой раздел «Группы и участники»
   return "limits";
 }
 function fromEnv(value) { return value === null ? "из .env" : value; }
 function localTime(iso) {
   return new Date(iso).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
-async function applySetting(item, change) {
+async function applySetting(item, change, question) {
   const next = change.reset ? `${item.env} (из .env)` : change.value;
   if (!change.reset && change.value === item.value) { say("Значение не изменилось."); return; }
   if (!change.reset && !change.value) { say("Введите значение."); return; }
-  const sure = await confirmAsk(`«${item.title}»: ${item.value} → ${next}. Бот перезапустится за несколько секунд, сообщения не теряются. Изменить?`);
+  const sure = await confirmAsk(question || `«${item.title}»: ${item.value} → ${next}. Бот перезапустится за несколько секунд, сообщения не теряются. Изменить?`);
   if (!sure) return;
   try {
     const answer = await busy(() => call("POST", "/api/admin/settings", { key: item.key, ...change }));
@@ -524,14 +525,106 @@ function settingCard(item, providers) {
       el("button", { class: "btn main", onclick: () => applySetting(item, { value: input.value.trim() }) }, "Сохранить"),
       item.from_panel ? el("button", { class: "btn", onclick: () => applySetting(item, { reset: true }) }, `Сбросить (${item.env})`) : null));
 }
+// --- 6а. группы и участники (11.04): те же действия, что /members в личке; письма участникам шлёт бот
+const ROLE_NAMES = { executor: "исполнитель", setter: "постановщик", manager: "руководитель" };
+const ROLE_GEN = { setter: "постановщика", manager: "руководителя" };
+const ROLE_INSTR = { setter: "постановщиком", manager: "руководителем" };
+const ROLE_STATE = { pending: "ждёт допуска", rejected: "отказано", inactive: "снято" };
+const ROLE_ORDER = ["manager", "setter", "executor"];
+const groupName = (g) => (g.title ? `«${g.title}»` : `Группа ${g.chat_id}`);
+const personName = (m) => m.name || `ID ${m.tg}`;
+function groupIds(item) { return item.value ? item.value.split(",").filter(Boolean) : []; }
+function groupsSection(list, item) {
+  const ids = groupIds(item);
+  const toggle = (g) => {
+    const next = g.allowed ? ids.filter((id) => id !== String(g.chat_id)) : [...ids, String(g.chat_id)];
+    if (!next.length) { say("Последнюю подключённую группу из панели не отключить."); return; }
+    const question = g.allowed
+      ? `Отключить группу ${groupName(g)}? Бот перестанет разбирать её сообщения. Бот перезапустится за несколько секунд.`
+      : `Подключить группу ${groupName(g)}? Бот начнёт разбирать её сообщения. Бот перезапустится за несколько секунд.`;
+    applySetting(item, { value: next.join(",") }, question);
+  };
+  const input = el("input", { class: "inp", placeholder: "-1001234567890", inputmode: "numeric", autocomplete: "off" });
+  const add = () => {
+    const id = input.value.trim();
+    if (!/^-\d{5,15}$/.test(id)) { say("ID группы — число с минусом, например -1001234567890. Его присылает бот, когда его добавили в неподключённую группу."); return; }
+    if (ids.includes(id)) { say("Эта группа уже подключена."); return; }
+    applySetting(item, { value: [...ids, id].join(",") }, `Подключить группу ${id}? Бот перезапустится за несколько секунд.`);
+  };
+  return [
+    el("div", { class: "sec" }, "Группы и участники"),
+    list.map((g) => el("div", { class: "set" },
+      el("div", { class: "title" }, groupName(g)),
+      el("div", { class: "note" }, `ID ${g.chat_id} · ${g.allowed ? "подключена" : "не подключена"} · участников ${g.members.length}${g.requests.length ? ` · заявок на роли ${g.requests.length}` : ""}`),
+      el("div", { class: "btns" },
+        g.allowed ? el("button", { class: "btn main", onclick: () => showMembers(g.chat_id) }, "Участники") : null,
+        el("button", { class: g.allowed ? "btn danger" : "btn", onclick: () => toggle(g) }, g.allowed ? "Отключить" : "Подключить")))),
+    el("div", { class: "set" },
+      el("label", { class: "lbl" }, "Подключить группу по ID"), input,
+      el("div", { class: "btns" }, el("button", { class: "btn", onclick: add }, "Подключить"))),
+  ];
+}
+async function memberAct(chatId, body, question) {
+  if (question && !(await confirmAsk(question))) return;
+  try {
+    const answer = await busy(() => call("POST", "/api/admin/members", { chat_id: chatId, role: "", request: 0, user: 0, ...body }));
+    haptic("success"); say(answer.text);
+  } catch (e) { haptic("error"); say(e.message); }
+  showMembers(chatId);
+}
+async function showMembers(chatId) {
+  view.tab = "settings"; markTab(); backButton(() => showSettings()); mainButton(null);
+  let g;
+  try { g = (await call("GET", "/api/admin/groups")).groups.find((x) => x.chat_id === chatId); }
+  catch (e) { show(el("div", { class: "empty" }, e.message)); return; }
+  if (!g) { show(el("div", { class: "empty" }, "Группы больше нет в списке.")); return; }
+  const hasManager = g.members.some((m) => m.roles.manager === "active");
+  const waiting = g.members.filter((m) => m.roles.executor === "pending");
+  const line = (m) => ROLE_ORDER.filter((r) => m.roles[r]).map((r) => (m.roles[r] === "active" ? ROLE_NAMES[r] : `${ROLE_NAMES[r]} — ${ROLE_STATE[m.roles[r]] || m.roles[r]}`)).join(", ");
+  const card = (m) => {
+    const buttons = [];
+    for (const r of ROLE_ORDER) {
+      if (m.roles[r] !== "active") continue;
+      buttons.push(el("button", { class: "btn danger", onclick: () => memberAct(chatId, { action: "remove", user: m.tg, role: r },
+        r === "executor" ? `Снять допуск у ${personName(m)}? Будут сняты все его роли в группе, руководителю придут его незакрытые поручения.` : `Снять права ${ROLE_GEN[r]} у ${personName(m)}?`) },
+        r === "executor" ? "Снять допуск" : `Снять: ${ROLE_NAMES[r]}`));
+    }
+    if (m.roles.executor === "active") {
+      for (const r of ["setter", "manager"]) {
+        if (m.roles[r] === "active" || (r === "manager" && hasManager)) continue;
+        buttons.push(el("button", { class: "btn", onclick: () => memberAct(chatId, { action: "grant", user: m.tg, role: r }, `Назначить ${personName(m)} ${ROLE_INSTR[r]}?`) }, `Назначить: ${ROLE_NAMES[r]}`));
+      }
+    }
+    if (m.roles.executor === "rejected") buttons.push(el("button", { class: "btn", onclick: () => memberAct(chatId, { action: "reopen", user: m.tg }) }, "Пересмотреть отказ"));
+    return el("div", { class: "set" }, el("div", { class: "title" }, personName(m)), el("div", { class: "note" }, `${line(m)} · ID ${m.tg}`),
+      buttons.length ? el("div", { class: "btns" }, buttons) : null);
+  };
+  show(
+    el("h1", {}, groupName(g)),
+    el("div", { class: "sub" }, "Решения — как в /members в личке: участнику бот напишет сам. Задачи участников здесь не видны."),
+    waiting.length ? [el("div", { class: "sec" }, "Заявки на допуск"), waiting.map((m) => el("div", { class: "set" },
+      el("div", { class: "title" }, personName(m)), el("div", { class: "note" }, `ID ${m.tg} · согласие дано, просит допуск исполнителем`),
+      el("div", { class: "btns" },
+        el("button", { class: "btn main", onclick: () => memberAct(chatId, { action: "admit", user: m.tg }) }, "Допустить"),
+        el("button", { class: "btn danger", onclick: () => memberAct(chatId, { action: "reject", user: m.tg }, `Отклонить допуск ${personName(m)}?`) }, "Отклонить"))))] : null,
+    g.requests.length ? [el("div", { class: "sec" }, "Заявки на роли"), g.requests.map((r) => el("div", { class: "set" },
+      el("div", { class: "title" }, personName(r)), el("div", { class: "note" }, `просит права ${ROLE_GEN[r.role] || r.role}`),
+      el("div", { class: "btns" },
+        el("button", { class: "btn main", onclick: () => memberAct(chatId, { action: "approve_role", request: r.id }) }, "Назначить"),
+        el("button", { class: "btn danger", onclick: () => memberAct(chatId, { action: "reject_role", request: r.id }, `Отклонить заявку ${personName(r)}?`) }, "Отклонить"))))] : null,
+    el("div", { class: "sec" }, `Участники: ${g.members.length}`),
+    g.members.length ? g.members.map(card) : el("div", { class: "note" }, "Участников пока нет: они появляются, когда нажимают «Начать» в личке с ботом."));
+}
+
 async function showSettings() {
   view.tab = "settings"; markTab(); backButton(groups().length ? () => showList() : null); mainButton(null);
-  let data, state;
-  try { [data, state] = await Promise.all([call("GET", "/api/admin/settings"), call("GET", "/api/admin/status")]); }
+  let data, state, known;
+  try { [data, state, known] = await Promise.all([call("GET", "/api/admin/settings"), call("GET", "/api/admin/status"), call("GET", "/api/admin/groups")]); }
   catch (e) { show(el("div", { class: "empty" }, e.message)); return; }
   show(
     el("h1", {}, "Настройки"),
     el("div", { class: "sub" }, "Изменение действует сразу: бот перезапускается за несколько секунд, администраторам приходит сообщение. Ключи и токены здесь не показываются."),
+    groupsSection(known.groups, data.items.find((item) => item.key === "ALLOWED_GROUP_IDS")),
     SETTING_GROUPS.map(([group, title]) => [
       el("div", { class: "sec" }, title),
       data.items.filter((item) => settingGroup(item.key) === group).map((item) => settingCard(item, data.providers)),
