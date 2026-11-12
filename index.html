@@ -95,6 +95,10 @@ textarea.inp { min-height: 72px; resize: vertical; }
 .more { width: 100%; }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 button:disabled { opacity: .5; }
+.set { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; margin: 8px 0; }
+.set .lbl { margin-top: 0; }
+.set .btns { margin-top: 8px; }
+.state { white-space: pre-wrap; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
 </style>
 </head>
 <body>
@@ -103,6 +107,7 @@ button:disabled { opacity: .5; }
   <button data-tab="list"><span class="i">☰</span>Задачи</button>
   <button data-tab="new"><span class="i">＋</span>Новая</button>
   <button data-tab="reports"><span class="i">▦</span>Отчёты</button>
+  <button data-tab="settings" hidden><span class="i">⚙</span>Настройки</button>
 </nav>
 <script>
 "use strict";
@@ -481,16 +486,76 @@ async function showReports() {
     data.links.length ? el("div", { class: "note" }, "Откроется только у тех, кому открыт доступ к папке «Бот поручений».") : null);
 }
 
+// --- 6. настройки (11.03, ADR-023): только администраторам; права проверяет сервер, ключей здесь нет
+const SETTING_GROUPS = [["ai", "Поставщик ИИ"], ["work", "Рабочее время и разбор"], ["limits", "Пределы расхода"]];
+const PROVIDER_NAMES = { groq: "Groq", cloudflare: "Cloudflare" };
+function settingGroup(key) {
+  if (key.endsWith("_PROVIDER")) return "ai";
+  if (key.startsWith("WORK_") || key === "MIN_ANALYSIS_WORDS") return "work";
+  return "limits";
+}
+function fromEnv(value) { return value === null ? "из .env" : value; }
+function localTime(iso) {
+  return new Date(iso).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+async function applySetting(item, change) {
+  const next = change.reset ? `${item.env} (из .env)` : change.value;
+  if (!change.reset && change.value === item.value) { say("Значение не изменилось."); return; }
+  if (!change.reset && !change.value) { say("Введите значение."); return; }
+  const sure = await confirmAsk(`«${item.title}»: ${item.value} → ${next}. Бот перезапустится за несколько секунд, сообщения не теряются. Изменить?`);
+  if (!sure) return;
+  try {
+    const answer = await busy(() => call("POST", "/api/admin/settings", { key: item.key, ...change }));
+    haptic("success");
+    if (!answer.restart) { say("Значение не изменилось."); return; }
+    show(el("div", { class: "empty" }, "Сохранено. Бот перезапускается — настройки откроются снова через несколько секунд."));
+    setTimeout(showSettings, 12000);
+  } catch (e) { haptic("error"); say(e.message); }
+}
+function settingCard(item, providers) {
+  const input = item.key.endsWith("_PROVIDER")
+    ? el("select", { class: "inp" }, providers.map((p) => el("option", { value: p, selected: p === item.value }, PROVIDER_NAMES[p] || p)))
+    : el("input", { class: "inp", value: item.value, inputmode: /^\d+$/.test(item.env) ? "numeric" : null, autocomplete: "off" });
+  return el("div", { class: "set" },
+    el("label", { class: "lbl" }, item.title),
+    input,
+    el("div", { class: "note" }, item.from_panel ? `Задано в панели; в .env — ${item.env}` : "Как в .env"),
+    el("div", { class: "btns" },
+      el("button", { class: "btn main", onclick: () => applySetting(item, { value: input.value.trim() }) }, "Сохранить"),
+      item.from_panel ? el("button", { class: "btn", onclick: () => applySetting(item, { reset: true }) }, `Сбросить (${item.env})`) : null));
+}
+async function showSettings() {
+  view.tab = "settings"; markTab(); backButton(groups().length ? () => showList() : null); mainButton(null);
+  let data, state;
+  try { [data, state] = await Promise.all([call("GET", "/api/admin/settings"), call("GET", "/api/admin/status")]); }
+  catch (e) { show(el("div", { class: "empty" }, e.message)); return; }
+  show(
+    el("h1", {}, "Настройки"),
+    el("div", { class: "sub" }, "Изменение действует сразу: бот перезапускается за несколько секунд, администраторам приходит сообщение. Ключи и токены здесь не показываются."),
+    SETTING_GROUPS.map(([group, title]) => [
+      el("div", { class: "sec" }, title),
+      data.items.filter((item) => settingGroup(item.key) === group).map((item) => settingCard(item, data.providers)),
+    ]),
+    el("div", { class: "sec" }, "Журнал изменений"),
+    data.history.length
+      ? el("div", { class: "hist" }, data.history.map((h) => el("div", {}, `${localTime(h.at)} — ${h.by}: «${h.title}» ${fromEnv(h.old)} → ${fromEnv(h.new)}`)))
+      : el("div", { class: "note" }, "Изменений из панели ещё не было."),
+    el("div", { class: "sec" }, "Состояние бота"),
+    el("div", { class: "set state" }, state.text));
+}
+
 // --- нижние вкладки
 function markTab() {
   for (const button of document.querySelectorAll("#tabs button")) {
     button.classList.toggle("on", button.dataset.tab === view.tab);
     if (button.dataset.tab === "new") button.hidden = !canCreate();
+    if (button.dataset.tab === "list" || button.dataset.tab === "reports") button.hidden = !groups().length;
+    if (button.dataset.tab === "settings") button.hidden = !(me && me.admin);
   }
 }
 document.getElementById("tabs").addEventListener("click", (event) => {
   const button = event.target.closest("button"); if (!button) return;
-  ({ list: showList, new: showNew, reports: showReports })[button.dataset.tab]();
+  ({ list: showList, new: showNew, reports: showReports, settings: showSettings })[button.dataset.tab]();
 });
 
 // --- запуск
@@ -503,9 +568,10 @@ async function start() {
   tg.ready(); tg.expand();
   tg.onEvent("themeChanged", applyTheme);
   try { me = await call("GET", "/api/me"); } catch (e) { show(el("div", { class: "empty" }, e.message)); return; }
-  if (!me.groups.length) { show(el("div", { class: "empty" }, "У вас пока нет роли в рабочей группе. Обратитесь к администратору.")); return; }
+  if (!me.groups.length && !me.admin) { show(el("div", { class: "empty" }, "У вас пока нет роли в рабочей группе. Обратитесь к администратору.")); return; }
   document.getElementById("tabs").hidden = false;
-  showList();
+  if (new URLSearchParams(location.search).get("open") === "settings" && me.admin) showSettings();
+  else if (me.groups.length) showList(); else showSettings();
 }
 start();
 </script>
