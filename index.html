@@ -654,9 +654,40 @@ function calendarSection(cal) {
 }
 
 // --- 6в. ключи (11.06, ПР-061): только владелец, только ввод; проверка у поставщика → «Подтвердить» за 5 минут
-const FIELD_NAMES = { GROQ_API_KEY: "Ключ Groq", CLOUDFLARE_API_TOKEN: "Токен Cloudflare (Workers AI)", CLOUDFLARE_ACCOUNT_ID: "ID аккаунта Cloudflare" };
+const FIELD_NAMES = { GROQ_API_KEY: "Ключ Groq", CLOUDFLARE_API_TOKEN: "Токен Cloudflare (Workers AI)", CLOUDFLARE_ACCOUNT_ID: "ID аккаунта Cloudflare", GOOGLE_WEB_CLIENT_ID: "ID клиента Google (Web application)", GOOGLE_WEB_CLIENT_SECRET: "Секрет клиента Google" };
+async function undoKey(item) {
+  if (!(await confirmAsk(`Отменить смену: ${item.title}? Вернётся прежний ключ, бот перезапустится.`))) return;
+  try {
+    await busy(() => call("POST", "/api/admin/secrets/undo", { name: item.name }));
+    haptic("success");
+    show(el("div", { class: "empty" }, "Смена отменена. Бот перезапускается — настройки откроются снова через несколько секунд."));
+    setTimeout(showSettings, 12000);
+  } catch (e) { haptic("error"); say(e.message); }
+}
+// 11.07: доступ к Google — не вводится, а выдаётся входом Google; страница Google открывается в браузере и возвращает в бота
+function googleCard(item) {
+  const grant = async () => {
+    if (!item.ready) { say("Сначала введите клиента Google — карточка «Клиент Google для входа из панели» ниже."); return; }
+    if (!(await confirmAsk(`Откроется страница Google. Войдите как ${item.account} и нажмите «Разрешить», затем вернитесь в Telegram. Всем администраторам придёт сообщение, бот перезапустится; отменить смену можно 24 часа.`))) return;
+    let started;
+    try { started = await busy(() => call("POST", "/api/admin/google/start")); }
+    catch (e) { haptic("error"); say(e.message); return; }
+    if (tg) tg.openLink(started.url); else window.open(started.url, "_blank", "noopener");
+    show(el("div", { class: "empty" }, "Завершите вход на странице Google (ссылка действует 10 минут) и вернитесь сюда."),
+      el("div", { class: "btns" }, el("button", { class: "btn main", onclick: showSettings }, "Обновить")));
+  };
+  const where = !item.set ? "не выдан" : item.from_panel ? "выдан в панели" : "выдан через .env на сервере";
+  const note = [where, `учётная запись ${item.account}`, item.undo_until ? `отменить смену можно до ${localTime(item.undo_until)}` : null];
+  return el("div", { class: "set" },
+    el("div", { class: "title" }, item.title),
+    el("div", { class: "note" }, note.filter(Boolean).join("; ")),
+    el("div", { class: "btns" },
+      el("button", { class: "btn main", onclick: grant }, "Выдать заново"),
+      item.undo_until ? el("button", { class: "btn danger", onclick: () => undoKey(item) }, "Отменить смену") : null));
+}
 function keysSection(items) {
   const card = (item) => {
+    if (item.manual === false) return googleCard(item);
     const inputs = item.fields.map((f) => [f, el("input", { class: "inp", type: "password", autocomplete: "off", spellcheck: "false", placeholder: FIELD_NAMES[f] || f })]);
     const check = async () => {
       const values = Object.fromEntries(inputs.map(([f, input]) => [f, input.value.trim()]));
@@ -675,15 +706,7 @@ function keysSection(items) {
         setTimeout(showSettings, 12000);
       } catch (e) { haptic("error"); say(e.message); }
     };
-    const undo = async () => {
-      if (!(await confirmAsk(`Отменить смену: ${item.title}? Вернётся прежний ключ, бот перезапустится.`))) return;
-      try {
-        await busy(() => call("POST", "/api/admin/secrets/undo", { name: item.name }));
-        haptic("success");
-        show(el("div", { class: "empty" }, "Смена отменена. Бот перезапускается — настройки откроются снова через несколько секунд."));
-        setTimeout(showSettings, 12000);
-      } catch (e) { haptic("error"); say(e.message); }
-    };
+    const undo = () => undoKey(item);
     const where = !item.set ? "не задан" : item.from_panel ? "задан в панели" : "задан в .env на сервере";
     return el("div", { class: "set" },
       el("div", { class: "title" }, item.title),
@@ -695,7 +718,7 @@ function keysSection(items) {
   };
   return [
     el("div", { class: "sec" }, "Ключи"),
-    el("div", { class: "note" }, "Видите только вы. Ключ не показывается — только «задан». Новый ключ проверяется у поставщика, затем нужно подтвердить; всем администраторам придёт сообщение. Токен бота и ключ копий меняются только на сервере."),
+    el("div", { class: "note" }, "Видите только вы. Ключ не показывается — только «задан». Новый ключ проверяется у поставщика, затем нужно подтвердить; доступ к Google выдаётся входом Google. Всем администраторам придёт сообщение. Токен бота и ключ копий меняются только на сервере."),
     items.map(card),
   ];
 }
