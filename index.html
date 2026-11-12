@@ -112,7 +112,10 @@ button:disabled { opacity: .5; }
 <script>
 "use strict";
 // Куда ходить за данными — только из этого списка: подпись Telegram не уходит на чужие адреса
-const APIS = { "": "https://api.saq-tech.kz", test: "https://api-test.saq-tech.kz" };
+// адрес API — по домену страницы: на время переезда с SAQ работают оба домена
+const APIS = location.hostname.endsWith("it-sk.kz")
+  ? { "": "https://api.it-sk.kz", test: "https://api-test.it-sk.kz" }
+  : { "": "https://api.saq-tech.kz", test: "https://api-test.saq-tech.kz" };
 const API = APIS[new URLSearchParams(location.search).get("env") || ""];
 const tg = window.Telegram && window.Telegram.WebApp;
 const STATES = { new: "Новая", accepted: "Принята", in_progress: "В работе", review: "На проверке", done: "Выполнена",
@@ -654,7 +657,7 @@ function calendarSection(cal) {
 }
 
 // --- 6в. ключи (11.06, ПР-061): только владелец, только ввод; проверка у поставщика → «Подтвердить» за 5 минут
-const FIELD_NAMES = { GROQ_API_KEY: "Ключ Groq", CLOUDFLARE_API_TOKEN: "Токен Cloudflare (Workers AI)", CLOUDFLARE_ACCOUNT_ID: "ID аккаунта Cloudflare", GOOGLE_WEB_CLIENT_ID: "ID клиента Google (Web application)", GOOGLE_WEB_CLIENT_SECRET: "Секрет клиента Google" };
+const FIELD_NAMES = { GROQ_API_KEY: "Ключ Groq", CLOUDFLARE_API_TOKEN: "Токен Cloudflare (Workers AI)", CLOUDFLARE_ACCOUNT_ID: "ID аккаунта Cloudflare", GOOGLE_WEB_CLIENT_ID: "ID клиента Google (Web application)", GOOGLE_WEB_CLIENT_SECRET: "Секрет клиента Google", GOOGLE_LOGIN_ACCOUNT: "Учётная запись Google (почта)" };
 async function undoKey(item) {
   if (!(await confirmAsk(`Отменить смену: ${item.title}? Вернётся прежний ключ, бот перезапустится.`))) return;
   try {
@@ -688,7 +691,7 @@ function googleCard(item) {
 function keysSection(items) {
   const card = (item) => {
     if (item.manual === false) return googleCard(item);
-    const inputs = item.fields.map((f) => [f, el("input", { class: "inp", type: "password", autocomplete: "off", spellcheck: "false", placeholder: FIELD_NAMES[f] || f })]);
+    const inputs = item.fields.map((f) => [f, el("input", { class: "inp", type: f === "GOOGLE_LOGIN_ACCOUNT" ? "email" : "password", autocomplete: "off", spellcheck: "false", placeholder: FIELD_NAMES[f] || f })]);
     const check = async () => {
       const values = Object.fromEntries(inputs.map(([f, input]) => [f, input.value.trim()]));
       if (Object.values(values).some((v) => !v)) { say("Заполните все поля."); return; }
