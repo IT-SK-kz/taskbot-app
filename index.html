@@ -490,12 +490,13 @@ async function showReports() {
 }
 
 // --- 6. настройки (11.03, ADR-023): только администраторам; права проверяет сервер, ключей здесь нет
-const SETTING_GROUPS = [["ai", "Поставщик ИИ"], ["work", "Рабочее время и разбор"], ["limits", "Пределы расхода"]];
+const SETTING_GROUPS = [["ai", "Поставщик ИИ"], ["work", "Рабочее время и разбор"], ["view", "Вид карточек"], ["limits", "Пределы расхода"]];
 const PROVIDER_NAMES = { groq: "Groq", cloudflare: "Cloudflare" };
 function settingGroup(key) {
   if (key.endsWith("_PROVIDER")) return "ai";
   if (key.startsWith("WORK_") || key === "MIN_ANALYSIS_WORDS") return "work";
-  if (key === "ALLOWED_GROUP_IDS") return "groups";  // свой раздел «Группы и участники»
+  if (key === "ALLOWED_GROUP_IDS") return "groups";
+  if (key === "WIDGETS_ENABLED") return "view";  // 12.03: карточка задачи виджетом  // свой раздел «Группы и участники»
   return "limits";
 }
 function fromEnv(value) { return value === null ? "из .env" : value; }
