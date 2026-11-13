@@ -676,12 +676,15 @@ function googleCard(item) {
     let started;
     try { started = await busy(() => call("POST", "/api/admin/google/start")); }
     catch (e) { haptic("error"); say(e.message); return; }
-    if (tg) tg.openLink(started.url); else window.open(started.url, "_blank", "noopener");
-    show(el("div", { class: "empty" }, "Завершите вход на странице Google (ссылка действует 10 минут) и вернитесь сюда."),
-      el("div", { class: "btns" }, el("button", { class: "btn main", onclick: showSettings }, "Обновить")));
+    // Telegram открывает внешнюю ссылку только прямо по нажатию — поэтому отдельная кнопка, а не сразу после запроса
+    const go = () => (tg ? tg.openLink(started.url) : window.open(started.url, "_blank", "noopener"));
+    show(el("div", { class: "empty" }, "Ссылка на вход Google готова (действует 10 минут). Нажмите кнопку, войдите и разрешите доступ, затем вернитесь сюда и нажмите «Обновить»."),
+      el("div", { class: "btns" }, el("button", { class: "btn main", onclick: go }, "Открыть страницу Google")),
+      el("div", { style: "height:8px" }),
+      el("div", { class: "btns" }, el("button", { class: "btn", onclick: showSettings }, "Обновить")));
   };
   const where = !item.set ? "не выдан" : item.from_panel ? "выдан в панели" : "выдан через .env на сервере";
-  const note = [where, `учётная запись ${item.account}`, item.undo_until ? `отменить смену можно до ${localTime(item.undo_until)}` : null];
+  const note = [where, `войти нужно под ${item.account}`, item.undo_until ? `отменить смену можно до ${localTime(item.undo_until)}` : null];
   return el("div", { class: "set" },
     el("div", { class: "title" }, item.title),
     el("div", { class: "note" }, note.filter(Boolean).join("; ")),
