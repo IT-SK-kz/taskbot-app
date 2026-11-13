@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
-<title>Поручения</title>
+<title>Задачи</title>
 <!--
-  Telegram Mini App бота поручений (08.03, ADR-022). Один файл без сборки: страница, стили и код.
+  Telegram Mini App бота задач (08.03, ADR-022). Один файл без сборки: страница, стили и код.
   Данные — только из API бота (адрес выбирается из закрытого списка ниже), вход — подписью Telegram initData.
   Тексты пользователя выводятся только как текст (textContent), не как HTML.
 -->
@@ -275,9 +275,9 @@ async function showList() {
         .map(([value, name]) => el("option", { value, selected: view.state === value }, name))),
     select("due", "Срок", [["late", "Просроченные"], ["today", "Сегодня"]]),
     filtersActive() ? el("button", { class: "link", onclick: () => { Object.assign(view, { state: "open", assignee: "", project: "", due: "", q: "" }); showList(); } }, "Сбросить") : null);
-  const items = view.items.length ? view.items.map(taskCard) : [el("div", { class: "empty" }, "Поручений по выбранным условиям нет.")];
+  const items = view.items.length ? view.items.map(taskCard) : [el("div", { class: "empty" }, "Задач по выбранным условиям нет.")];
   const more = view.items.length < view.total ? el("button", { class: "btn more", onclick: async () => { await loadList(true); showList(); } }, "Показать ещё") : null;
-  show(seg, search, chips, el("div", { class: "meta", style: "margin:4px 0 8px" }, `${view.total} ${plural(view.total, "поручение", "поручения", "поручений")}` + (late ? ` · ${late} просрочено` : "")), ...items, more);
+  show(seg, search, chips, el("div", { class: "meta", style: "margin:4px 0 8px" }, `${view.total} ${plural(view.total, "задача", "задачи", "задач")}` + (late ? ` · ${late} просрочено` : "")), ...items, more);
 }
 function plural(n, one, few, many) { const m = n % 100, k = n % 10; return m > 10 && m < 20 ? many : k === 1 ? one : k >= 2 && k <= 4 ? few : many; }
 
@@ -295,7 +295,7 @@ async function openTask(id) {
   const buttons = task.actions.filter((a) => ACTIONS[a]).map((action) =>
     el("button", { class: "btn main", onclick: () => act(task, action) }, ACTIONS[action]));
   if (task.actions.includes("edit")) buttons.push(el("button", { class: "btn", onclick: () => editTask(task) }, "Изменить"));
-  if (task.actions.includes("cancel")) buttons.push(el("button", { class: "btn danger", onclick: () => act(task, "cancel") }, "Отменить поручение"));
+  if (task.actions.includes("cancel")) buttons.push(el("button", { class: "btn danger", onclick: () => act(task, "cancel") }, "Отменить задачу"));
   show(
     el("button", { class: "back", onclick: () => showList() }, "‹ Задачи"),
     el("div", { class: "num" }, `№${task.id}`), el("h1", {}, task.title), tags(task),
@@ -311,7 +311,7 @@ async function openTask(id) {
 }
 async function act(task, action, comment) {
   if (action === "return" && !comment) { askComment(task); return; }
-  if (action === "cancel" && !(await confirmAsk(`Отменить поручение №${task.id}? Исполнитель получит уведомление.`))) return;
+  if (action === "cancel" && !(await confirmAsk(`Отменить задачу №${task.id}? Исполнитель получит уведомление.`))) return;
   try {
     await call("POST", `/api/tasks/${task.id}/action`, { version: task.version, action, comment });
     haptic("success");
@@ -374,7 +374,7 @@ const apiDue = (value) => (value ? value.replace(":", "").replace(/^(\d{4}-\d{2}
 function showNew() {
   view.tab = "new"; markTab(); backButton(() => showList());
   const allowed = groups().filter((g) => g.can_create);
-  if (!allowed.length) { mainButton(null); show(el("div", { class: "empty" }, "Ставить поручения могут постановщик и руководитель группы.")); return; }
+  if (!allowed.length) { mainButton(null); show(el("div", { class: "empty" }, "Ставить задачи могут постановщик и руководитель группы.")); return; }
   const state = { chat: allowed[0].chat_id, people: [], text: "", project: null, due: "", priority: "normal" };
   const group = () => allowed.find((g) => g.chat_id === Number(state.chat));
   const box = el("div");
@@ -390,7 +390,7 @@ function showNew() {
       el("option", { value: "" }, "+ Добавить"),
       g.people.filter((p) => !state.people.includes(p.id)).map((p) => el("option", { value: p.id }, p.name)));
     put(box, 
-      el("h1", {}, "Новое поручение"),
+      el("h1", {}, "Новая задача"),
       allowed.length > 1
         ? [el("label", { class: "lbl" }, "Группа"), el("select", { class: "inp", onchange: (event) => { state.chat = Number(event.target.value); state.people = []; draw(); } },
             allowed.map((x) => el("option", { value: x.chat_id, selected: x.chat_id === state.chat }, x.title)))]
@@ -404,7 +404,7 @@ function showNew() {
         g.projects.map((p) => el("option", { value: p.id, selected: p.id === state.project }, p.name))),
       g.can_add_project ? el("div", { class: "note" }, "Новый проект — командой /projects в боте.") : null,
       dueField(state, "Срок"), priorityField(state));
-    mainButton(state.people.length > 1 ? `Создать ${state.people.length} поручения` : "Создать поручение", submit);
+    mainButton(state.people.length > 1 ? `Создать ${state.people.length} ${plural(state.people.length, "задачу", "задачи", "задач")}` : "Создать задачу", submit);
   }
   async function submit() {
     if (!state.people.length) { say("Выберите исполнителя."); return; }
@@ -413,7 +413,7 @@ function showNew() {
       const made = await busy(() => call("POST", "/api/tasks", { chat_id: Number(state.chat), text: state.text, assignees: state.people,
         due: apiDue(state.due), priority: state.priority, project: state.project }));
       haptic("success");
-      say(made.created.length > 1 ? `Создано поручений: ${made.created.length}. Исполнители получат уведомления в боте.` : `Поручение №${made.created[0]} создано.`);
+      say(made.created.length > 1 ? `Создано задач: ${made.created.length}. Исполнители получат уведомления в боте.` : `Задача №${made.created[0]} создана.`);
       view.scope = "set"; showList();
     } catch (e) { haptic("error"); say(e.message); }
   }
@@ -464,7 +464,7 @@ function editTask(task) {
     try {
       await busy(() => call("POST", `/api/tasks/${task.id}`, { version: task.version, changes: diff() }));
       haptic("success"); openTask(task.id);
-    } catch (e) { haptic("error"); say(e.message); if (e.message.startsWith("Поручение уже изменилось")) openTask(task.id); }
+    } catch (e) { haptic("error"); say(e.message); if (e.message.startsWith("Задача уже изменилась")) openTask(task.id); }
   }
   show(box); draw();
 }
@@ -590,7 +590,7 @@ async function showMembers(chatId) {
     for (const r of ROLE_ORDER) {
       if (m.roles[r] !== "active") continue;
       buttons.push(el("button", { class: "btn danger", onclick: () => memberAct(chatId, { action: "remove", user: m.tg, role: r },
-        r === "executor" ? `Снять допуск у ${personName(m)}? Будут сняты все его роли в группе, руководителю придут его незакрытые поручения.` : `Снять права ${ROLE_GEN[r]} у ${personName(m)}?`) },
+        r === "executor" ? `Снять допуск у ${personName(m)}? Будут сняты все его роли в группе, руководителю придут его незакрытые задачи.` : `Снять права ${ROLE_GEN[r]} у ${personName(m)}?`) },
         r === "executor" ? "Снять допуск" : `Снять: ${ROLE_NAMES[r]}`));
     }
     if (m.roles.executor === "active") {
