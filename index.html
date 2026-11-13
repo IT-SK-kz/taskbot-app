@@ -112,11 +112,10 @@ button:disabled { opacity: .5; }
 <script>
 "use strict";
 // Куда ходить за данными — только из этого списка: подпись Telegram не уходит на чужие адреса
-// адрес API — по домену страницы: на время переезда с SAQ работают оба домена
-const APIS = location.hostname.endsWith("it-sk.kz")
-  ? { "": "https://api.it-sk.kz", test: "https://api-test.it-sk.kz" }
-  : { "": "https://api.saq-tech.kz", test: "https://api-test.saq-tech.kz" };
-const API = APIS[new URLSearchParams(location.search).get("env") || ""];
+// env — только из списка (иначе, например, ?env=constructor, адресом стала бы строка функции)
+const APIS = { "": "https://api.it-sk.kz", test: "https://api-test.it-sk.kz" };
+const ENV = new URLSearchParams(location.search).get("env") || "";
+const API = Object.prototype.hasOwnProperty.call(APIS, ENV) ? APIS[ENV] : null;
 const tg = window.Telegram && window.Telegram.WebApp;
 const STATES = { new: "Новая", accepted: "Принята", in_progress: "В работе", review: "На проверке", done: "Выполнена",
                  rework: "На доработке", cancelled: "Отменена" };
